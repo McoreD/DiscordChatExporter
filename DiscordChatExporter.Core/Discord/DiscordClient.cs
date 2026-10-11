@@ -20,11 +20,25 @@ namespace DiscordChatExporter.Core.Discord;
 
 public class DiscordClient(
     string token,
-    RateLimitPreference rateLimitPreference = RateLimitPreference.RespectAll
+    RateLimitPreference rateLimitPreference = RateLimitPreference.RespectAll,
+    bool cacheMetadata = false
 )
 {
     private readonly Uri _baseUri = new("https://discord.com/api/v10/", UriKind.Absolute);
     private TokenKind? _resolvedTokenKind;
+    private readonly AsyncCache<string, JsonElement> _metadataCache = new();
+    private readonly AsyncCache<string, JsonElement?> _memberCache = new();
+
+    private ValueTask<JsonElement> GetMetadataResponseAsync(
+        string url,
+        CancellationToken cancellationToken
+    )
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return cacheMetadata
+            ? _metadataCache.GetOrAddAsync(url, () => GetJsonResponseAsync(url, cancellationToken))
+            : GetJsonResponseAsync(url, cancellationToken);
+    }
 
     private async ValueTask<HttpResponseMessage> GetResponseAsync(
         string url,
@@ -258,7 +272,7 @@ public class DiscordClient(
         if (guildId == Guild.DirectMessages.Id)
             return Guild.DirectMessages;
 
-        var response = await GetJsonResponseAsync($"guilds/{guildId}", cancellationToken);
+        var response = await GetMetadataResponseAsync($"guilds/{guildId}", cancellationToken);
         return Guild.Parse(response);
     }
 
@@ -275,7 +289,7 @@ public class DiscordClient(
         }
         else
         {
-            var response = await GetJsonResponseAsync(
+            var response = await GetMetadataResponseAsync(
                 $"guilds/{guildId}/channels",
                 cancellationToken
             );
@@ -344,7 +358,7 @@ public class DiscordClient(
         if (guildId == Guild.DirectMessages.Id)
             yield break;
 
-        var response = await GetJsonResponseAsync($"guilds/{guildId}/roles", cancellationToken);
+        var response = await GetMetadataResponseAsync($"guilds/{guildId}/roles", cancellationToken);
         foreach (var roleJson in response.EnumerateArray())
             yield return Role.Parse(roleJson);
     }
@@ -358,10 +372,14 @@ public class DiscordClient(
         if (guildId == Guild.DirectMessages.Id)
             return null;
 
-        var response = await TryGetJsonResponseAsync(
-            $"guilds/{guildId}/members/{memberId}",
-            cancellationToken
-        );
+        cancellationToken.ThrowIfCancellationRequested();
+        var url = $"guilds/{guildId}/members/{memberId}";
+        var response = cacheMetadata
+            ? await _memberCache.GetOrAddAsync(
+                url,
+                () => TryGetJsonResponseAsync(url, cancellationToken)
+            )
+            : await TryGetJsonResponseAsync(url, cancellationToken);
 
         return response?.Pipe(j => Member.Parse(j, guildId));
     }

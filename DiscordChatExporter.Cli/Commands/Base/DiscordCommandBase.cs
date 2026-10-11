@@ -38,7 +38,10 @@ public abstract class DiscordCommandBase : ICommand
     protected DiscordClient Discord =>
         field ??= new DiscordClient(
             Token,
-            ShouldRespectRateLimits ? RateLimitPreference.RespectAll : RateLimitPreference.IgnoreAll
+            ShouldRespectRateLimits
+                ? RateLimitPreference.RespectAll
+                : RateLimitPreference.IgnoreAll,
+            cacheMetadata: true
         );
 
     public virtual ValueTask ExecuteAsync(IConsole console)
